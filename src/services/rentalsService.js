@@ -8,22 +8,6 @@ function formatDate(date) {
   return new Date(date).toISOString().split('T')[0];
 }
 
-// Função para calcular dias de atraso
-function calculateDaysLate(rentDate, daysRented, returnDate) {
-  // Garante que as datas são objetos Date (ignora horário/localidade)
-  const rent = new Date(rentDate.split('T')[0]);
-  const expectedReturn = new Date(rent);
-  expectedReturn.setDate(rent.getDate() + daysRented);
-  
-  const actualReturn = new Date(returnDate.split('T')[0]);
-
-  // Diferença em milissegundos → dias
-  const diffMs = actualReturn - expectedReturn;
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24)); // Arredonda para baixo
-
-  return diffDays > 0 ? diffDays : 0; // Retorna 0 se não houver atraso
-}
-
 // Cria um novo aluguel
 async function createRental(customerId, gameId, daysRented) {
   // Validação dos dados de entrada
@@ -74,35 +58,70 @@ async function finishRental(id, returnDate) {
     // 1. Busca o aluguel
     const rental = await rentalsRepository.findRentalById(id);
     if (!rental) throw { type: 'NOT_FOUND', message: 'Aluguel não existe!' };
-    if (rental.returnDate) throw { type: 'CONFLICT', message: 'Aluguel já finalizado!' };
+    if (rental.returnDate) throw { type: 'UNPROCESSABLE_ENTITY', message: 'Aluguel já finalizado!' };
 
-    // 2. Garante que returnDate é válida (ou usa a atual)
-    const effectiveReturnDate = returnDate || new Date().toISOString().split('T')[0];
+    // 2. Formata a data para YYYY-MM-DD (se veio como YYYYMMDD)
+    const formattedReturnDate = returnDate.includes('-') 
+      ? returnDate 
+      : `${returnDate.slice(0, 4)}-${returnDate.slice(4, 6)}-${returnDate.slice(6, 8)}`;
 
-    // 3. Cálculo CORRETO do atraso (em milissegundos)
-    const rentDateObj = new Date(rental.rentDate);
-    const expectedReturnObj = new Date(rental.rentDate);
-    expectedReturnObj.setDate(rentDateObj.getDate() + rental.daysRented);
-    
-    const actualReturnObj = new Date(effectiveReturnDate);
-    const diffMs = actualReturnObj - expectedReturnObj;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24)); // Arredonda para baixo
+    // 3. Validação com Joi (atualize seu schema conforme código anterior)
+    const { error } = finishRentalSchema.validate({ returnDate: formattedReturnDate });
+    if (error) throw { type: 'BAD_REQUEST', message: 'Data inválida!' };
 
-    // 4. Calcula a multa se houver atraso
+    // 4. Cálculo do atraso com datas formatadas
+    const daysLate = calculateDaysLate(
+      rental.rentDate, // Já deve estar no formato YYYY-MM-DD
+      rental.daysRented, 
+      formattedReturnDate
+    );
+
+    // 5. Busca e valida o preço do jogo
     const game = await rentalsRepository.findGameById(rental.gameId);
-    const delayFee = diffDays > 0 ? diffDays * game.pricePerDay : null;
+    if (!game?.pricePerDay) throw { type: 'NOT_FOUND', message: 'Preço do jogo inválido!' };
 
-    // 5. Atualiza no banco
-    await rentalsRepository.finishRental(id, effectiveReturnDate, delayFee);
+    // 6. Cálculo preciso da multa
+    const delayFee = daysLate > 0 
+      ? daysLate * Number(game.pricePerDay) 
+      : null;
+
+    // DEBUG (verifique no console)
+    console.log('Cálculo:', {
+      rentDate: rental.rentDate,
+      expectedReturn: new Date(rental.rentDate).getDate() + rental.daysRented,
+      returnDate: formattedReturnDate,
+      pricePerDay: game.pricePerDay,
+      daysLate,
+      calculatedFee: delayFee
+    });
+
+    // 7. Atualiza com a data formatada
+    await rentalsRepository.finishRental(id, formattedReturnDate, delayFee);
 
   } catch (err) {
-    console.error('Erro em finishRental:', { 
+    console.error('Erro em finishRental:', {
       error: err.message,
-      stack: err.stack,
-      rentalId: id,
-      returnDate
+      receivedDate: returnDate,
+      stack: err.stack
     });
     throw err;
+  }
+}
+
+// Versão à prova de erros
+function calculateDaysLate(rentDate, daysRented, returnDate) {
+  try {
+    const rent = new Date(rentDate);
+    const expectedReturn = new Date(rent);
+    expectedReturn.setDate(rent.getDate() + daysRented);
+    
+    const actualReturn = new Date(returnDate);
+    const diffTime = actualReturn - expectedReturn;
+    
+    return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+  } catch (err) {
+    console.error('Erro no cálculo:', { rentDate, returnDate, err });
+    return 0; // Fallback seguro
   }
 }
 
