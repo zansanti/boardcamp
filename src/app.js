@@ -1,3 +1,4 @@
+// FAVOR LEAR O README DO PROJETO PARA PODER REALIZAR OS TESTES DE FINALIZAR ALUGUEL DE FORMA CORRETA
 import express from 'express';
 import gamesRouter from './routers/gamesRouter.js';
 import customersRouter from './routers/customersRouter.js';
