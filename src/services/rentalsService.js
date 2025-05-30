@@ -53,57 +53,28 @@ async function getRentals() {
   }));
 }
 
-async function finishRental(id, returnDate) {
+async function finishRental(id) { // Remove o parâmetro returnDate
   try {
-    // 1. Busca o aluguel
     const rental = await rentalsRepository.findRentalById(id);
     if (!rental) throw { type: 'NOT_FOUND', message: 'Aluguel não existe!' };
-    if (rental.returnDate) throw { type: 'UNPROCESSABLE_ENTITY', message: 'Aluguel já finalizado!' };
+    if (rental.returnDate) throw { type: 'CONFLICT', message: 'Aluguel já finalizado!' };
 
-    // 2. Formata a data para YYYY-MM-DD (se veio como YYYYMMDD)
-    const formattedReturnDate = returnDate.includes('-') 
-      ? returnDate 
-      : `${returnDate.slice(0, 4)}-${returnDate.slice(4, 6)}-${returnDate.slice(6, 8)}`;
+    // Data atual em formato ISO (YYYY-MM-DD)
+    const returnDate = new Date().toISOString().split('T')[0]; 
 
-    // 3. Validação com Joi (atualize seu schema conforme código anterior)
-    const { error } = finishRentalSchema.validate({ returnDate: formattedReturnDate });
-    if (error) throw { type: 'BAD_REQUEST', message: 'Data inválida!' };
-
-    // 4. Cálculo do atraso com datas formatadas
     const daysLate = calculateDaysLate(
-      rental.rentDate, // Já deve estar no formato YYYY-MM-DD
+      rental.rentDate, 
       rental.daysRented, 
-      formattedReturnDate
+      returnDate // Agora sempre usa a data atual
     );
 
-    // 5. Busca e valida o preço do jogo
     const game = await rentalsRepository.findGameById(rental.gameId);
-    if (!game?.pricePerDay) throw { type: 'NOT_FOUND', message: 'Preço do jogo inválido!' };
+    const delayFee = daysLate > 0 ? daysLate * Number(game.pricePerDay) : null;
 
-    // 6. Cálculo preciso da multa
-    const delayFee = daysLate > 0 
-      ? daysLate * Number(game.pricePerDay) 
-      : null;
-
-    // DEBUG (verifique no console)
-    console.log('Cálculo:', {
-      rentDate: rental.rentDate,
-      expectedReturn: new Date(rental.rentDate).getDate() + rental.daysRented,
-      returnDate: formattedReturnDate,
-      pricePerDay: game.pricePerDay,
-      daysLate,
-      calculatedFee: delayFee
-    });
-
-    // 7. Atualiza com a data formatada
-    await rentalsRepository.finishRental(id, formattedReturnDate, delayFee);
+    await rentalsRepository.finishRental(id, returnDate, delayFee);
 
   } catch (err) {
-    console.error('Erro em finishRental:', {
-      error: err.message,
-      receivedDate: returnDate,
-      stack: err.stack
-    });
+    console.error('Erro em finishRental:', err);
     throw err;
   }
 }

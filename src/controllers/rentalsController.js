@@ -14,10 +14,8 @@ async function getRentals(req, res) {
 }
 
 async function finishRental(req, res) {
-  const { id } = req.params;
-  const { returnDate } = req.body; 
-  
-  await rentalsService.finishRental(id, returnDate);
+  const { id } = req.params; 
+  await rentalsService.finishRental(id); 
   res.sendStatus(200);
 }
 
